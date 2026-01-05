@@ -79,3 +79,11 @@ where dag_id = 'taskgroup_rename_history_demo'
 
 COMMIT;
 
+
+
+
+###### final
+delete from task_instance
+where dag_id = 'taskgroup_rename_history_demo'
+  and task_id like 'bonds.%';
+
