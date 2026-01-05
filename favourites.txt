@@ -1,6 +1,81 @@
-banana
-apple
-orange
-The HangOver
-Jumanji
-The grate Gatspy
+######### 0op
+export PGPASSWORD='airflow'
+pg_dump -h postgres -U airflow -d airflow -f airflow_backup.sql
+
+# restore 
+psql -d airflow -f airflow_backup.sql
+
+
+############## 1'st op
+BEGIN;
+
+DO $$
+DECLARE
+  cols text;
+  cols_select text;
+BEGIN
+  -- target column list (all columns in task_instance)
+  SELECT string_agg(quote_ident(column_name), ', ' ORDER BY ordinal_position)
+    INTO cols
+  FROM information_schema.columns
+  WHERE table_schema = 'public'
+    AND table_name = 'task_instance';
+
+  -- source select list, but with task_id replaced
+  SELECT string_agg(
+    CASE
+      WHEN column_name = 'task_id'
+        THEN 'replace(task_id, ''bonds.'', ''fxpm.'') AS task_id'
+      ELSE quote_ident(column_name)
+    END,
+    ', ' ORDER BY ordinal_position
+  )
+    INTO cols_select
+  FROM information_schema.columns
+  WHERE table_schema = 'public'
+    AND table_name = 'task_instance';
+
+  EXECUTE format(
+    'INSERT INTO task_instance (%s)
+     SELECT %s
+     FROM task_instance
+     WHERE dag_id = %L AND task_id LIKE %L
+     ON CONFLICT DO NOTHING',
+    cols, cols_select, 'taskgroup_rename_history_demo', 'bonds.%'
+  );
+END $$;
+
+COMMIT;
+############### 2nd op
+
+
+BEGIN;
+
+update rendered_task_instance_fields
+set task_id = replace(task_id, 'bonds.', 'fxpm.')
+where dag_id = 'taskgroup_rename_history_demo'
+  and task_id like 'bonds.%';
+
+update xcom
+set task_id = replace(task_id, 'bonds.', 'fxpm.')
+where dag_id = 'taskgroup_rename_history_demo'
+  and task_id like 'bonds.%';
+
+update task_fail
+set task_id = replace(task_id, 'bonds.', 'fxpm.')
+where dag_id = 'taskgroup_rename_history_demo'
+  and task_id like 'bonds.%';
+
+update task_reschedule
+set task_id = replace(task_id, 'bonds.', 'fxpm.')
+where dag_id = 'taskgroup_rename_history_demo'
+  and task_id like 'bonds.%';
+
+-- optional but useful for UI event history
+update log
+set task_id = replace(task_id, 'bonds.', 'fxpm.')
+where dag_id = 'taskgroup_rename_history_demo'
+  and task_id like 'bonds.%';
+
+COMMIT;
+
