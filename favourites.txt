@@ -1,55 +1,34 @@
--- Show the sequence used by job.id (usually job_id_seq)
-SELECT pg_get_serial_sequence('job', 'id') AS job_id_seq;
+DO $$
+DECLARE
+  r record;
+  seq_name text;
+BEGIN
+  FOR r IN
+    SELECT
+      c.table_name,
+      c.column_name,
+      pg_get_serial_sequence(quote_ident(c.table_name), c.column_name) AS seq
+    FROM information_schema.columns c
+    WHERE c.table_schema = 'public'
+      AND c.column_default LIKE 'nextval(%'
+      AND pg_get_serial_sequence(quote_ident(c.table_name), c.column_name) IS NOT NULL
+  LOOP
+    seq_name := r.seq;
 
--- Resync it so the next generated id is > current max(id)
-SELECT setval(
-  pg_get_serial_sequence('job', 'id'),
-  (SELECT COALESCE(MAX(id), 1) FROM job)
-);
-
-
-  -- Build SELECT list, replacing task_id only
-  SELECT string_agg(
-    CASE
-      WHEN column_name = 'task_id'
-        THEN format('replace(task_id, %L, %L) AS task_id', old_prefix, new_prefix)
-      ELSE
-        quote_ident(column_name)
-    END,
-    ', ' ORDER BY ordinal_position
-  )
-    INTO cols_select
-  FROM information_schema.columns
-  WHERE table_schema = 'public'
-    AND table_name = 'task_instance';
-
-  EXECUTE format(
-    'INSERT INTO task_instance (%s)
-     SELECT %s
-     FROM task_instance
-     WHERE dag_id = %L
-       AND task_id LIKE %L
-     ON CONFLICT DO NOTHING',
-    cols, cols_select, v_dag, old_prefix || '%'
-  );
+    EXECUTE format(
+      'SELECT setval(%L, (SELECT COALESCE(MAX(%I),0)+1 FROM %I), false);',
+      seq_name, r.column_name, r.table_name
+    );
+  END LOOP;
 END $$;
 
 
--- 2) Rewire dependent tables to the new task_id (now the parent exists)
-UPDATE rendered_task_instance_fields
-SET task_id = replace(task_id, 'ETLs.bonds.', 'ETLs.fxpm.')
-WHERE dag_id = 'YOUR_DAG_ID_HERE'
-  AND task_id LIKE 'ETLs.bonds.%';
 
-UPDATE xcom
-SET task_id = replace(task_id, 'ETLs.bonds.', 'ETLs.fxpm.')
-WHERE dag_id = 'YOUR_DAG_ID_HERE'
-  AND task_id LIKE 'ETLs.bonds.%';
 
-UPDATE task_fail
-SET task_id = replace(task_id, 'ETLs.bonds.', 'ETLs.fxpm.')
-WHERE dag_id = 'YOUR_DAG_ID_HERE'
-  AND task_id LIKE 'ETLs.bonds.%';
+
+
+
+
 
 UPDATE task_reschedule
 SET task_id = replace(task_id, 'ETLs.bonds.', 'ETLs.fxpm.')
